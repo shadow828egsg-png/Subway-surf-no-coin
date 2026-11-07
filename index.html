@@ -1,0 +1,341 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Urban Runner 3D</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;overflow:hidden;background:#75c9ed;font-family:Arial,sans-serif;touch-action:none}
+canvas{display:block}
+#hud{position:fixed;top:15px;left:0;width:100%;display:flex;justify-content:space-around;color:white;font-weight:bold;font-size:19px;text-shadow:2px 2px 4px #222;pointer-events:none}
+#message{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;background:#0009;color:white;text-align:center;padding:25px}
+#message h1{font-size:35px;margin:8px}
+#message p{font-size:17px;line-height:1.5}
+button{border:0;border-radius:12px;padding:14px 30px;background:#ffcf32;color:#222;font-size:20px;font-weight:bold}
+#hint{position:fixed;bottom:15px;width:100%;text-align:center;color:white;text-shadow:1px 2px 3px black;font-weight:bold;pointer-events:none}
+</style>
+</head>
+<body>
+<div id="hud">
+ <span>⏱️ <span id="time">0.0</span>s</span>
+ <span>🪙 <span id="coins">0</span></span>
+ <span>🏆 <span id="record">0</span>s</span>
+</div>
+<div id="message">
+ <h1>URBAN RUNNER 3D</h1>
+ <p>Deslize para os lados para mudar de pista.<br>
+ Deslize para cima para pular.<br>
+ Deslize para baixo para abaixar.<br>
+ Pegue moedas para congelar o cronômetro!</p>
+ <button id="start">JOGAR</button>
+</div>
+<div id="hint">⬅️ Arraste para os lados • ⬆️ Pule • ⬇️ Abaixe</div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x79c9ed);
+scene.fog = new THREE.Fog(0x79c9ed, 35, 110);
+
+const camera = new THREE.PerspectiveCamera(65, innerWidth/innerHeight, .1, 150);
+camera.position.set(0,5.5,10);
+camera.lookAt(0,1,-8);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.7));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xffffff,0x667788,2));
+const sun=new THREE.DirectionalLight(0xffffff,2.3);
+sun.position.set(-5,12,7);
+sun.castShadow=true;
+scene.add(sun);
+
+const mat=(color,roughness=.8)=>new THREE.MeshStandardMaterial({color,roughness});
+const groundMat=mat(0x454b55);
+const railMat=mat(0x777d85);
+const gold=mat(0xffc928,.3);
+const blue=mat(0x1676d2);
+const red=mat(0xe84a36);
+const dark=mat(0x263747);
+const white=mat(0xffffff);
+
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(22,180),groundMat);
+ground.rotation.x=-Math.PI/2;
+ground.position.set(0,-.12,-45);
+ground.receiveShadow=true;
+scene.add(ground);
+
+const lanes=[-2.2,0,2.2];
+const tracks=[];
+for(let lane=-1;lane<=1;lane++){
+ const x=lane*2.2;
+ for(const side of [-.48,.48]){
+  const rail=new THREE.Mesh(new THREE.BoxGeometry(.12,.12,180),railMat);
+  rail.position.set(x+side,-.02,-45);
+  scene.add(rail);
+ }
+ for(let z=-90;z<10;z+=3){
+  const sleeper=new THREE.Mesh(new THREE.BoxGeometry(1.35,.12,.35),mat(0x665344));
+  sleeper.position.set(x,-.06,z);
+  scene.add(sleeper);
+  tracks.push(sleeper);
+ }
+}
+
+// Prédios do cenário
+const buildings=[];
+for(let i=0;i<34;i++){
+ for(const side of [-1,1]){
+  const h=5+Math.random()*13;
+  const b=new THREE.Mesh(new THREE.BoxGeometry(5,h,5),mat([0x9b806d,0x73899b,0xc2a17b,0x71836e][i%4]));
+  b.position.set(side*(8+Math.random()*3),h/2-0.1,-i*5-5);
+  scene.add(b);
+  buildings.push(b);
+  for(let y=1;y<h-1;y+=2.2){
+   const win=new THREE.Mesh(new THREE.BoxGeometry(.08,.8,3.5),mat(0xffdf8c));
+   win.position.set(b.position.x-side*2.52,y,b.position.z);
+   scene.add(win);
+  }
+ }
+}
+
+// Personagem original
+const player=new THREE.Group();
+scene.add(player);
+player.position.set(0,0,0);
+
+const body=new THREE.Mesh(new THREE.BoxGeometry(.65,.85,.4),blue);
+body.position.y=1.15;
+player.add(body);
+const head=new THREE.Mesh(new THREE.SphereGeometry(.34,20,16),mat(0xd99a69));
+head.position.y=1.83;
+player.add(head);
+const hair=new THREE.Mesh(new THREE.SphereGeometry(.35,16,12),dark);
+hair.scale.set(1, .55, 1);
+hair.position.set(0,2.04,0);
+player.add(hair);
+const legMat=mat(0x263b65);
+const legs=[];
+for(const x of [-.2,.2]){
+ const leg=new THREE.Mesh(new THREE.BoxGeometry(.22,.65,.25),legMat);
+ leg.position.set(x,.43,0);
+ player.add(leg);
+ legs.push(leg);
+}
+const arms=[];
+for(const x of [-.43,.43]){
+ const arm=new THREE.Mesh(new THREE.BoxGeometry(.2,.65,.22),mat(0xd99a69));
+ arm.position.set(x,1.18,0);
+ player.add(arm);
+ arms.push(arm);
+}
+
+// Policial
+const police=new THREE.Group();
+const policeBody=new THREE.Mesh(new THREE.BoxGeometry(.65,.9,.4),mat(0x183b72));
+policeBody.position.y=1.1;
+police.add(policeBody);
+const policeHead=new THREE.Mesh(new THREE.SphereGeometry(.32,16,12),mat(0xc58b61));
+policeHead.position.y=1.75;
+police.add(policeHead);
+const hat=new THREE.Mesh(new THREE.BoxGeometry(.75,.15,.65),dark);
+hat.position.y=2.05;
+police.add(hat);
+police.position.set(0,0,3.2);
+scene.add(police);
+
+// Objetos do jogo
+const objects=[];
+function makeObstacle(type,lane,z){
+ const group=new THREE.Group();
+ const x=lanes[lane];
+ if(type==='barrier'){
+  const box=new THREE.Mesh(new THREE.BoxGeometry(1.5,1.1,.7),red);
+  box.position.y=.55;group.add(box);
+ }else if(type==='sign'){
+  const bar=new THREE.Mesh(new THREE.BoxGeometry(1.8,.25,.3),gold);
+  bar.position.y=1.65;group.add(bar);
+  const post=new THREE.Mesh(new THREE.BoxGeometry(.12,1.6,.12),dark);
+  post.position.y=.8;group.add(post);
+ }else if(type==='train'){
+  const train=new THREE.Mesh(new THREE.BoxGeometry(1.9,2.8,9),mat(0x176b9b));
+  train.position.y=1.4;group.add(train);
+  const roof=new THREE.Mesh(new THREE.BoxGeometry(1.95,.18,9),white);
+  roof.position.y=2.85;group.add(roof);
+  for(let i=0;i<4;i++){
+   const window=new THREE.Mesh(new THREE.BoxGeometry(.05,.85,1.2),mat(0x9de7f2));
+   window.position.set(0,1.9,-3+i*2);group.add(window);
+  }
+  // Rampa para subir no trem
+  const ramp=new THREE.Mesh(new THREE.BoxGeometry(1.8,.25,2.5),mat(0x9c9c9c));
+  ramp.rotation.x=-.25;
+  ramp.position.set(0,.45,5.4);
+  group.add(ramp);
+ }
+ group.position.set(x,0,z);
+ scene.add(group);
+ objects.push({group,type,lane,hit:false});
+}
+function makeCoin(lane,z){
+ const coin=new THREE.Mesh(new THREE.TorusGeometry(.34,.12,10,20),gold);
+ coin.position.set(lanes[lane],1.35,z);
+ coin.rotation.y=Math.PI/2;
+ scene.add(coin);
+ objects.push({group:coin,type:'coin',lane,hit:false});
+}
+let spawnTimer=0;
+function spawn(){
+ const lane=Math.floor(Math.random()*3);
+ const r=Math.random();
+ if(r<.22) makeCoin(lane,-75);
+ else if(r<.48) makeObstacle('barrier',lane,-75);
+ else if(r<.68) makeObstacle('sign',lane,-75);
+ else makeObstacle('train',lane,-85);
+}
+
+// Estado
+let running=false,elapsed=0,coinCount=0,record=0;
+let speed=17,lane=1,jump=0,duck=0,trainRide=0;
+let policeCatch=0;
+let last=0;
+const timeEl=document.getElementById('time');
+const coinEl=document.getElementById('coins');
+const recordEl=document.getElementById('record');
+const message=document.getElementById('message');
+
+function updateHUD(){
+ timeEl.textContent=elapsed.toFixed(1);
+ coinEl.textContent=coinCount;
+ recordEl.textContent=record.toFixed(1);
+}
+function clearObjects(){
+ for(const o of objects) scene.remove(o.group);
+ objects.length=0;
+}
+function startGame(){
+ clearObjects();
+ elapsed=0;coinCount=0;speed=17;lane=1;jump=0;duck=0;trainRide=0;policeCatch=0;
+ player.position.set(0,0,0);
+ police.position.set(0,0,3.2);
+ running=true;
+ spawnTimer=0;
+ message.style.display='none';
+ updateHUD();
+}
+function endGame(){
+ running=false;
+ policeCatch=1;
+ message.innerHTML='<h1>O POLICIAL TE PEGOU!</h1><p>Você fez '+elapsed.toFixed(1)+' segundos<br>Moedas: '+coinCount+'</p><button id="restart">JOGAR DE NOVO</button>';
+ message.style.display='flex';
+ document.getElementById('restart').onclick=startGame;
+}
+document.getElementById('start').onclick=startGame;
+
+// Controles por toque e teclado
+let startX=0,startY=0;
+renderer.domElement.addEventListener('touchstart',e=>{
+ const t=e.changedTouches[0];startX=t.clientX;startY=t.clientY;
+},{passive:true});
+renderer.domElement.addEventListener('touchend',e=>{
+ const t=e.changedTouches[0];
+ swipe(t.clientX-startX,t.clientY-startY);
+},{passive:true});
+function swipe(dx,dy){
+ if(!running)return;
+ if(Math.abs(dx)>Math.abs(dy)){
+  if(dx>25)lane=Math.min(2,lane+1);
+  if(dx< -25)lane=Math.max(0,lane-1);
+ }else{
+  if(dy< -25 && jump<=0 && duck<=0)jump=1;
+  if(dy>25)duck=.7;
+ }
+}
+addEventListener('keydown',e=>{
+ if(e.key==='ArrowLeft')lane=Math.max(0,lane-1);
+ if(e.key==='ArrowRight')lane=Math.min(2,lane+1);
+ if(e.key==='ArrowUp'&&jump<=0)jump=1;
+ if(e.key==='ArrowDown')duck=.7;
+});
+
+// Animação
+function animate(now){
+ requestAnimationFrame(animate);
+ const dt=Math.min((now-last)/1000,.04);
+ last=now;
+ if(running){
+  // O cronômetro congela ao pegar a primeira moeda
+  if(coinCount===0)elapsed+=dt;
+  speed=Math.min(27,speed+dt*.12);
+  spawnTimer+=dt;
+  if(spawnTimer>1.05){spawn();spawnTimer=0;}
+
+  player.position.x=THREE.MathUtils.lerp(player.position.x,lanes[lane],dt*10);
+  if(jump>0){
+   jump+=dt*2.5;
+   player.position.y=Math.sin(Math.min(jump,1)*Math.PI)*2.3;
+   if(jump>=1){jump=0;player.position.y=0;}
+  }else if(trainRide<=0)player.position.y=0;
+
+  if(duck>0){
+   duck-=dt;
+   player.scale.y=.55;
+  }else player.scale.y=1;
+
+  legs.forEach((leg,i)=>leg.rotation.x=Math.sin(now*.014+i*Math.PI)*.7);
+  arms.forEach((arm,i)=>arm.rotation.x=Math.sin(now*.014+i*Math.PI)*.6);
+
+  for(let i=objects.length-1;i>=0;i--){
+   const o=objects[i];
+   o.group.position.z+=speed*dt;
+   if(o.type==='coin'){
+    o.group.rotation.x+=dt*2;
+    if(!o.hit && Math.abs(o.group.position.z)<1.15 &&
+       Math.abs(player.position.x-o.group.position.x)<.9 &&
+       Math.abs(player.position.y-1.35)<1.5){
+      o.hit=true;coinCount++;scene.remove(o.group);objects.splice(i,1);continue;
+    }
+   }else if(!o.hit && Math.abs(o.group.position.z)<1.25 &&
+       Math.abs(player.position.x-o.group.position.x)<1.05){
+      let avoided=false;
+      if(o.type==='barrier')avoided=player.position.y>1.1;
+      if(o.type==='sign')avoided=duck>0;
+      if(o.type==='train')avoided=player.position.y>2.4;
+      if(!avoided){
+       o.hit=true;
+       policeCatch=1;
+      }
+   }
+   if(o.group.position.z>12){
+    scene.remove(o.group);objects.splice(i,1);
+   }
+  }
+
+  // Policial se aproxima se o jogador bater em algo
+  if(policeCatch>0){
+   policeCatch+=dt*.7;
+   police.position.z=THREE.MathUtils.lerp(police.position.z,.7,dt*2);
+   if(policeCatch>2.8)endGame();
+  }else{
+   police.position.z=3.2+Math.sin(now*.01)*.08;
+  }
+  updateHUD();
+ }
+ renderer.render(scene,camera);
+}
+requestAnimationFrame(animate);
+
+addEventListener('resize',()=>{
+ camera.aspect=innerWidth/innerHeight;
+ camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
